@@ -120,79 +120,92 @@ class JiraClient:
 
     def create_task(self, title: str, description: str, project_key: str, language: str = "Ukrainian", issue_type: str = "Story") -> str:
         url = f"{self.base_url}/rest/api/3/issue"
+
+        sprint_id = self.get_active_sprint_id(project_key)
+        if sprint_id:
+            print(f"  Активний спринт знайдено (ID: {sprint_id})")
+        else:
+            print("  Активного спринту немає — задача потрапить в беклог")
+
         fields = {
             "project": {"key": project_key},
             "summary": title,
             "description": self._task_to_adf(description, language),
             "issuetype": {"name": issue_type},
         }
+        if sprint_id:
+            fields["customfield_10020"] = sprint_id
+
         response = requests.post(url, json={"fields": fields}, auth=self.auth, headers=self.headers)
         response.raise_for_status()
         return response.json()["key"]
 
     def _task_to_adf(self, body: str, language: str = "Ukrainian") -> dict:
-        section_labels = {
-            "Ukrainian": {
-                "WHAT": "Що потрібно реалізувати",
-                "AC":   "Критерії приймання (Acceptance Criteria)",
-            },
-            "Russian": {
-                "WHAT": "Что нужно реализовать",
-                "AC":   "Критерии приёмки (Acceptance Criteria)",
-            },
-            "English": {
-                "WHAT": "What needs to be implemented",
-                "AC":   "Acceptance Criteria",
-            },
+        ac_labels = {
+            "Ukrainian": "Критерії приймання (Acceptance Criteria)",
+            "Russian":   "Критерии приёмки (Acceptance Criteria)",
+            "English":   "Acceptance Criteria",
         }
-        labels = section_labels.get(language, section_labels["Ukrainian"])
-
-        sections = {}
-        for match in re.finditer(r"##(\w+)##\n(.*?)(?=##\w+##|\Z)", body, re.DOTALL):
-            sections[match.group(1)] = match.group(2).strip()
-
-        if not sections:
-            return {"type": "doc", "version": 1, "content": [
-                {"type": "paragraph", "content": [{"type": "text", "text": body.strip()}]}
-            ]}
 
         content = []
+        pattern = re.compile(r"##(\w+)##([^\n]*)\n(.*?)(?=##\w+##|\Z)", re.DOTALL)
 
-        if sections.get("DESC"):
-            content.append({"type": "paragraph", "content": [{"type": "text", "text": sections["DESC"]}]})
+        for match in pattern.finditer(body):
+            marker  = match.group(1)
+            heading = match.group(2).strip()
+            text    = match.group(3).strip()
 
-        if sections.get("WHAT"):
-            content.append({"type": "heading", "attrs": {"level": 3},
-                            "content": [{"type": "text", "text": labels["WHAT"]}]})
-            items = self._parse_list_items(sections["WHAT"], numbered=True)
-            if items:
-                content.append({"type": "orderedList", "content": items})
+            if marker == "DESC":
+                for line in text.replace("\\n", "\n").split("\n"):
+                    line = line.strip()
+                    if line:
+                        content.append({"type": "paragraph", "content": [{"type": "text", "text": line}]})
 
-        if sections.get("AC"):
-            content.append({"type": "heading", "attrs": {"level": 3},
-                            "content": [{"type": "text", "text": labels["AC"]}]})
-            items = self._parse_list_items(sections["AC"], numbered=False)
-            if items:
-                content.append({"type": "bulletList", "content": items})
+            elif marker == "SECTION":
+                if heading:
+                    content.append({
+                        "type": "heading", "attrs": {"level": 3},
+                        "content": [{"type": "text", "text": heading}],
+                    })
+                items = []
+                for line in text.split("\n"):
+                    line = line.strip().lstrip("-•").strip()
+                    if not line:
+                        continue
+                    parts = line.replace("\\n", "\n").split("\n")
+                    cell_content = [
+                        {"type": "paragraph", "content": [{"type": "text", "text": p.strip()}]}
+                        for p in parts if p.strip()
+                    ]
+                    if cell_content:
+                        items.append({"type": "listItem", "content": cell_content})
+                if items:
+                    content.append({"type": "bulletList", "content": items})
+
+            elif marker == "AC":
+                content.append({
+                    "type": "heading", "attrs": {"level": 3},
+                    "content": [{"type": "text", "text": ac_labels.get(language, ac_labels["Ukrainian"])}],
+                })
+                items = []
+                for line in text.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.replace("\\n", "\n").split("\n")
+                    cell_content = [
+                        {"type": "paragraph", "content": [{"type": "text", "text": p.strip()}]}
+                        for p in parts if p.strip()
+                    ]
+                    if cell_content:
+                        items.append({"type": "listItem", "content": cell_content})
+                if items:
+                    content.append({"type": "bulletList", "content": items})
+
+        if not content:
+            content = [{"type": "paragraph", "content": [{"type": "text", "text": body.strip()}]}]
 
         return {"type": "doc", "version": 1, "content": content}
-
-    def _parse_list_items(self, text: str, numbered: bool = False) -> list:
-        items = []
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line:
-                continue
-            if numbered:
-                line = re.sub(r"^\d+\.\s*", "", line)
-            parts = line.replace("\\n", "\n").split("\n")
-            cell_content = [
-                {"type": "paragraph", "content": [{"type": "text", "text": p.strip()}]}
-                for p in parts if p.strip()
-            ]
-            if cell_content:
-                items.append({"type": "listItem", "content": cell_content})
-        return items
 
     def get_active_sprint_id(self, project_key: str) -> int | None:
         boards_url = f"{self.base_url}/rest/agile/1.0/board"
