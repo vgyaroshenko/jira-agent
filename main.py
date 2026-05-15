@@ -1,6 +1,11 @@
 import sys
 import click
+import questionary
 from jira_client import JiraClient
+
+_LANG_CHOICES = ["UA — українська", "RU — русский", "EN — English"]
+_TYPE_CHOICES = ["Story", "Task"]
+_LANG_MAP = {"RU": "Russian", "UA": "Ukrainian", "EN": "English"}
 
 
 def _detect_language(text: str) -> str:
@@ -11,6 +16,20 @@ def _detect_language(text: str) -> str:
     if any("Ѐ" <= c <= "ӿ" for c in text):
         return "Russian"
     return "English"
+
+
+def _ask_language(prompt: str) -> str:
+    choice = questionary.select(prompt, choices=_LANG_CHOICES).ask()
+    if not choice:
+        sys.exit(0)
+    return choice.split(" — ")[0]
+
+
+def _ask_type() -> str:
+    choice = questionary.select("Що створити?", choices=_TYPE_CHOICES).ask()
+    if not choice:
+        sys.exit(0)
+    return choice
 
 
 @click.group()
@@ -66,7 +85,7 @@ def comment(issue_key, mention):
 
 @cli.command("new-bug")
 @click.option("--title", required=True, help="Заголовок бага (до 80 символів)")
-@click.option("--lang", default=None, help="Мова: UA, RU, EN (авто якщо не вказано)")
+@click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
 @click.option("--project", default=None, help="Ключ проекту (наприклад GN)")
 @click.option("--related", default=None, help="Ключ пов'язаної задачі (наприклад GN-1652)")
 def new_bug(title, lang, project, related):
@@ -79,16 +98,18 @@ def new_bug(title, lang, project, related):
       ...
       EOF
     """
+    if not lang:
+        lang = _ask_language("На якій мові створити баг-репорт?")
+
     description = sys.stdin.read().strip()
     if not description:
         click.echo("❌ Опис порожній")
         sys.exit(1)
 
-    lang_map = {"RU": "Russian", "UA": "Ukrainian", "EN": "English"}
-    language = lang_map.get((lang or "").upper()) or _detect_language(title)
-
+    language = _LANG_MAP.get(lang.upper(), _detect_language(title))
     project_key = project or (related.split("-")[0] if related else None)
 
+    click.echo(f"\n⏳ Створюю баг...")
     jira = JiraClient()
     bug_key = jira.create_bug(
         title=title[:80],
@@ -103,33 +124,33 @@ def new_bug(title, lang, project, related):
 
 @cli.command("new-task")
 @click.option("--title", required=True, help="Заголовок задачі")
-@click.option("--lang", default=None, help="Мова: UA, RU, EN (авто якщо не вказано)")
+@click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
 @click.option("--project", required=True, help="Ключ проекту (наприклад GN)")
-@click.option("--type", "issue_type", default="Story", show_default=True,
-              help="Тип задачі: Story, Task")
+@click.option("--type", "issue_type", default=None, help="Тип: Story, Task. Якщо не вказано — запитається інтерактивно")
 def new_task(title, lang, project, issue_type):
     """Прочитати опис задачі зі stdin і створити в Jira.
 
     \b
     Приклад:
-      python main.py new-task --title "Назва задачі" --lang UA --project GN << 'EOF'
+      python main.py new-task --title "Назва" --lang UA --type Story --project GN << 'EOF'
       ##DESC##
-      Короткий опис...
-      ##WHAT##
-      1. Перший пункт\\nДеталі...
-      ##AC##
-      AC1. Критерій\\n✅ Очікуваний результат: ...
+      ...
       EOF
     """
+    if not issue_type:
+        issue_type = _ask_type()
+
+    if not lang:
+        lang = _ask_language("На якій мові створити задачу?")
+
     description = sys.stdin.read().strip()
     if not description:
         click.echo("❌ Опис порожній")
         sys.exit(1)
 
-    lang_map = {"RU": "Russian", "UA": "Ukrainian", "EN": "English"}
-    language = lang_map.get((lang or "").upper()) or _detect_language(title)
+    language = _LANG_MAP.get(lang.upper(), _detect_language(title))
 
-    click.echo(f"\n⏳ Створюю задачу в проекті {project}...")
+    click.echo(f"\n⏳ Створюю {issue_type} в проекті {project}...")
     jira = JiraClient()
     task_key = jira.create_task(
         title=title,
@@ -138,7 +159,7 @@ def new_task(title, lang, project, issue_type):
         language=language,
         issue_type=issue_type,
     )
-    click.echo(f"\n✅ Задача створена: {task_key}")
+    click.echo(f"\n✅ {issue_type} створено: {task_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{task_key}")
 
 

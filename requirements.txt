@@ -1,4 +1,4 @@
-anthropic>=0.92.0
 requests>=2.31.0
 click>=8.1.0
 python-dotenv>=1.0.0
+questionary>=2.0.0
