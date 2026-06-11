@@ -1,7 +1,11 @@
+import os
 import sys
 import click
 import questionary
+from dotenv import load_dotenv
 from jira_client import JiraClient
+
+load_dotenv()
 
 _LANG_CHOICES = ["UA — українська", "RU — русский", "EN — English"]
 _TYPE_CHOICES = ["Story", "Task"]
@@ -161,6 +165,59 @@ def new_task(title, lang, project, issue_type):
     )
     click.echo(f"\n✅ {issue_type} створено: {task_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{task_key}")
+
+
+@cli.command()
+@click.argument("issue_key")
+@click.option("--title", default=None, help="Новий заголовок задачі")
+@click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
+def update(issue_key, title, lang):
+    """Оновити задачу в Jira: заголовок та/або опис зі stdin.
+
+    \b
+    Приклади:
+      python main.py update GN-1808 --title "Новий заголовок"
+      python main.py update GN-1808 --lang UA << 'EOF'
+      ##DESC##
+      ...
+      EOF
+      python main.py update GN-1808 --title "Новий заголовок" --lang UA << 'EOF'
+      ##DESC##
+      ...
+      EOF
+    """
+    description = None
+    if not sys.stdin.isatty():
+        description = sys.stdin.read().strip() or None
+
+    if not title and not description:
+        click.echo("❌ Вкажіть --title або передайте новий опис через stdin")
+        sys.exit(1)
+
+    if description and not lang:
+        lang = _ask_language("На якій мові оновити задачу?")
+
+    language = _LANG_MAP.get((lang or "").upper(), _detect_language(description or title or ""))
+
+    click.echo(f"\n⏳ Оновлюю {issue_key}...")
+    jira = JiraClient()
+    jira.update_issue(issue_key, title=title, description=description, language=language)
+    click.echo(f"✅ Задачу {issue_key} оновлено")
+    click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
+
+
+@cli.command()
+@click.argument("project_key")
+def lang(project_key):
+    """Повернути мову проекту з .env (PROJECT_LANG_KEY). Виводить UA, RU або EN.
+
+    \b
+    Приклад:
+      python main.py lang GN
+    """
+    key = project_key.upper().replace("-", "_")
+    language = os.getenv(f"PROJECT_LANG_{key}", "")
+    click.echo(language)
 
 
 @cli.command()

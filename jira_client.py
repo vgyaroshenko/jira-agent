@@ -335,6 +335,22 @@ class JiraClient:
 
         return {"type": "doc", "version": 1, "content": content}
 
+    def update_issue(self, issue_key: str, title: str = None, description: str = None, language: str = "Ukrainian") -> None:
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}"
+        fields = {}
+        if title:
+            fields["summary"] = title
+        if description:
+            bug_markers = {"##ENV##", "##STEPS##", "##EXPECTED##", "##ACTUAL##"}
+            if any(m in description for m in bug_markers):
+                fields["description"] = self._structured_to_adf(description, language)
+            else:
+                fields["description"] = self._task_to_adf(description, language)
+        if not fields:
+            raise ValueError("Нічого оновлювати")
+        response = requests.put(url, json={"fields": fields}, auth=self.auth, headers=self.headers)
+        response.raise_for_status()
+
     def search_issues(self, jql: str, max_results: int = 50) -> list:
         url = f"{self.base_url}/rest/api/3/search/jql"
         params = {"jql": jql, "maxResults": max_results, "fields": "summary,status,issuetype,comment"}
