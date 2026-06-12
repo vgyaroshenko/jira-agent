@@ -41,6 +41,19 @@ class JiraClient:
             "reporter_name": reporter.get("displayName", ""),
         }
 
+    def get_comments(self, issue_key: str) -> list:
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/comment"
+        response = requests.get(url, auth=self.auth, headers=self.headers,
+                                params={"maxResults": 100, "orderBy": "created"})
+        response.raise_for_status()
+        result = []
+        for c in response.json().get("comments", []):
+            author = (c.get("author") or {}).get("displayName", "Unknown")
+            date = (c.get("created") or "")[:10]
+            text = self._extract_text_from_adf(c.get("body"))
+            result.append({"author": author, "date": date, "text": text})
+        return result
+
     def add_comment(self, issue_key: str, comment_text: str, mention_account_id: str = None) -> None:
         url = f"{self.base_url}/rest/api/3/issue/{issue_key}/comment"
 

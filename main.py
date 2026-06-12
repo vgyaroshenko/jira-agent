@@ -53,6 +53,7 @@ def fetch(issue_key):
     """
     jira = JiraClient()
     issue = jira.get_issue_text(issue_key)
+    comments = jira.get_comments(issue_key)
     click.echo(f"KEY: {issue['key']}")
     click.echo(f"TYPE: {issue['issue_type']}")
     click.echo(f"STATUS: {issue['status']}")
@@ -61,6 +62,13 @@ def fetch(issue_key):
     click.echo(f"REPORTER_ID: {issue['reporter_account_id'] or ''}")
     click.echo(f"\nDESCRIPTION:\n{issue['description'] or 'Відсутній'}")
     click.echo(f"\nACCEPTANCE_CRITERIA:\n{issue['acceptance_criteria'] or 'Не вказано'}")
+    if comments:
+        click.echo(f"\nCOMMENTS ({len(comments)}):")
+        for i, c in enumerate(comments, 1):
+            click.echo(f"\n[{i}] {c['author']} ({c['date']}):")
+            click.echo(c['text'])
+    else:
+        click.echo("\nCOMMENTS: Немає")
 
 
 @cli.command()
