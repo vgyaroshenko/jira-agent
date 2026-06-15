@@ -131,7 +131,7 @@ class JiraClient:
 
         return {"type": "table", "content": rows}
 
-    def create_task(self, title: str, description: str, project_key: str, language: str = "Ukrainian", issue_type: str = "Story") -> str:
+    def create_task(self, title: str, description: str, project_key: str, language: str = "Ukrainian", issue_type: str = "Story", related_issue_key: str = None) -> str:
         url = f"{self.base_url}/rest/api/3/issue"
 
         sprint_id = self.get_active_sprint_id(project_key)
@@ -151,7 +151,12 @@ class JiraClient:
 
         response = requests.post(url, json={"fields": fields}, auth=self.auth, headers=self.headers)
         response.raise_for_status()
-        return response.json()["key"]
+        task_key = response.json()["key"]
+
+        if related_issue_key:
+            self._link_issues(task_key, related_issue_key)
+
+        return task_key
 
     def _task_to_adf(self, body: str, language: str = "Ukrainian") -> dict:
         ac_labels = {

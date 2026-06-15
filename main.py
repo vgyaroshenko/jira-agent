@@ -139,7 +139,8 @@ def new_bug(title, lang, project, related):
 @click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
 @click.option("--project", required=True, help="Ключ проекту (наприклад GN)")
 @click.option("--type", "issue_type", default=None, help="Тип: Story, Task. Якщо не вказано — запитається інтерактивно")
-def new_task(title, lang, project, issue_type):
+@click.option("--related", default=None, help="Ключ пов'язаної задачі (наприклад GN-1652)")
+def new_task(title, lang, project, issue_type, related):
     """Прочитати опис задачі зі stdin і створити в Jira.
 
     \b
@@ -170,6 +171,7 @@ def new_task(title, lang, project, issue_type):
         project_key=project,
         language=language,
         issue_type=issue_type,
+        related_issue_key=related,
     )
     click.echo(f"\n✅ {issue_type} створено: {task_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{task_key}")
