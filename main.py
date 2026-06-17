@@ -217,6 +217,23 @@ def update(issue_key, title, lang):
 
 
 @cli.command()
+@click.argument("issue_key")
+@click.argument("file_path", type=click.Path(exists=True))
+def attach(issue_key, file_path):
+    """Прикріпити файл до задачі.
+
+    \b
+    Приклад:
+      python main.py attach GN-1808 /path/to/screenshot.png
+    """
+    click.echo(f"\n⏳ Прикріплюю файл до {issue_key}...")
+    jira = JiraClient()
+    filename = jira.attach_file(issue_key, file_path)
+    click.echo(f"✅ Файл прикріплено: {filename}")
+    click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
+
+
+@cli.command()
 @click.argument("project_key")
 def lang(project_key):
     """Повернути мову проекту з .env (PROJECT_LANG_KEY). Виводить UA, RU або EN.

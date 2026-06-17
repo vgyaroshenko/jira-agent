@@ -403,6 +403,22 @@ class JiraClient:
                 return True
         return False
 
+    def attach_file(self, issue_key: str, file_path: str) -> str:
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/attachments"
+        headers = {**self.headers, "X-Atlassian-Token": "no-check"}
+        del headers["Content-Type"]
+        with open(file_path, "rb") as f:
+            import os
+            filename = os.path.basename(file_path)
+            response = requests.post(
+                url,
+                auth=self.auth,
+                headers=headers,
+                files={"file": (filename, f)},
+            )
+        response.raise_for_status()
+        return response.json()[0]["filename"]
+
     def _link_issues(self, bug_key: str, related_key: str) -> None:
         url = f"{self.base_url}/rest/api/3/issueLink"
         payload = {
