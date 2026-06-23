@@ -70,6 +70,15 @@ def fetch(issue_key):
     else:
         click.echo("\nCOMMENTS: Немає")
 
+    dest_dir = f"/tmp/jira-{issue_key}"
+    attachments = jira.download_attachments(issue_key, dest_dir)
+    if attachments:
+        click.echo(f"\nATTACHMENTS ({len(attachments)}):")
+        for att in attachments:
+            click.echo(f"  [{att['mime_type']}] {att['path']}")
+    else:
+        click.echo("\nATTACHMENTS: Немає")
+
 
 @cli.command()
 @click.argument("issue_key")
@@ -213,6 +222,50 @@ def update(issue_key, title, lang):
     jira = JiraClient()
     jira.update_issue(issue_key, title=title, description=description, language=language)
     click.echo(f"✅ Задачу {issue_key} оновлено")
+    click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
+
+
+@cli.command("publish-tests")
+@click.argument("issue_key", required=False)
+def publish_tests(issue_key):
+    """Опублікувати тест-кейси з test-cases/ як коментар до задачі.
+
+    \b
+    Приклади:
+      python main.py publish-tests MES-477
+      python main.py publish-tests
+    """
+    import glob
+    test_cases_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-cases")
+
+    if issue_key:
+        file_path = os.path.join(test_cases_dir, f"{issue_key.upper()}.md")
+        if not os.path.exists(file_path):
+            click.echo(f"❌ Файл не знайдено: {file_path}")
+            sys.exit(1)
+    else:
+        files = sorted(glob.glob(os.path.join(test_cases_dir, "*.md")))
+        if not files:
+            click.echo("❌ В папці test-cases немає збережених тест-кейсів")
+            sys.exit(1)
+        choices = [os.path.basename(f).replace(".md", "") for f in files]
+        choice = questionary.select("Тест-кейси якої задачі опублікувати?", choices=choices).ask()
+        if not choice:
+            sys.exit(0)
+        issue_key = choice
+        file_path = os.path.join(test_cases_dir, f"{issue_key}.md")
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+
+    if not text:
+        click.echo(f"❌ Файл {file_path} порожній")
+        sys.exit(1)
+
+    click.echo(f"\n⏳ Публікую тест-кейси для {issue_key}...")
+    jira = JiraClient()
+    jira.add_comment(issue_key, text)
+    click.echo(f"✅ Тест-кейси опубліковано до {issue_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
 
 

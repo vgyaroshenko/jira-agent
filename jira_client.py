@@ -73,19 +73,37 @@ class JiraClient:
         print(f"  ✓ Коментар додано до {issue_key}")
 
     def _text_to_adf_content(self, text: str) -> list:
-        """Convert text (with optional markdown table) to ADF content nodes."""
+        """Convert text (markdown tables, headings, lists, paragraphs) to ADF content nodes."""
         nodes = []
         lines = text.split("\n")
         i = 0
-        buffer = []
+        list_buffer = []
+        list_type = None  # 'ordered' or 'bullet'
+
+        def flush_list():
+            nonlocal list_buffer, list_type
+            if not list_buffer:
+                return
+            node_type = "orderedList" if list_type == "ordered" else "bulletList"
+            nodes.append({
+                "type": node_type,
+                "content": [
+                    {"type": "listItem", "content": [
+                        {"type": "paragraph", "content": [{"type": "text", "text": item}]}
+                    ]}
+                    for item in list_buffer
+                ],
+            })
+            list_buffer.clear()
+            list_type = None
 
         while i < len(lines):
-            if lines[i].strip().startswith("|"):
-                if buffer:
-                    para = "\n".join(buffer).strip()
-                    if para:
-                        nodes.append({"type": "paragraph", "content": [{"type": "text", "text": para}]})
-                    buffer = []
+            line = lines[i]
+            stripped = line.strip()
+
+            # Markdown table
+            if stripped.startswith("|"):
+                flush_list()
                 table_lines = []
                 while i < len(lines) and lines[i].strip().startswith("|"):
                     table_lines.append(lines[i])
@@ -93,15 +111,58 @@ class JiraClient:
                 table_node = self._markdown_table_to_adf(table_lines)
                 if table_node:
                     nodes.append(table_node)
-            else:
-                buffer.append(lines[i])
+                continue
+
+            # Headings: #, ##, ###
+            heading_match = re.match(r"^(#{1,3})\s+(.+)$", stripped)
+            if heading_match:
+                flush_list()
+                nodes.append({
+                    "type": "heading",
+                    "attrs": {"level": len(heading_match.group(1))},
+                    "content": [{"type": "text", "text": heading_match.group(2).strip()}],
+                })
                 i += 1
+                continue
 
-        if buffer:
-            para = "\n".join(buffer).strip()
-            if para:
-                nodes.append({"type": "paragraph", "content": [{"type": "text", "text": para}]})
+            # Horizontal rule — skip
+            if re.match(r"^[-*_]{3,}$", stripped):
+                flush_list()
+                i += 1
+                continue
 
+            # Ordered list: "1. text"
+            ol_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+            if ol_match:
+                if list_type == "bullet":
+                    flush_list()
+                list_type = "ordered"
+                list_buffer.append(ol_match.group(1))
+                i += 1
+                continue
+
+            # Bullet list: "- text" or "* text"
+            ul_match = re.match(r"^[-*]\s+(.+)$", stripped)
+            if ul_match:
+                if list_type == "ordered":
+                    flush_list()
+                list_type = "bullet"
+                list_buffer.append(ul_match.group(1))
+                i += 1
+                continue
+
+            # Empty line
+            if not stripped:
+                flush_list()
+                i += 1
+                continue
+
+            # Regular paragraph
+            flush_list()
+            nodes.append({"type": "paragraph", "content": [{"type": "text", "text": stripped}]})
+            i += 1
+
+        flush_list()
         return nodes or [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]
 
     def _markdown_table_to_adf(self, lines: list) -> dict | None:
@@ -402,6 +463,30 @@ class JiraClient:
             if text in content:
                 return True
         return False
+
+    def download_attachments(self, issue_key: str, dest_dir: str) -> list:
+        """Download all attachments to dest_dir. Returns list of {filename, path, mime_type}."""
+        import os
+        issue = self.get_issue(issue_key)
+        attachments = issue["fields"].get("attachment", [])
+        if not attachments:
+            return []
+        os.makedirs(dest_dir, exist_ok=True)
+        results = []
+        for att in attachments:
+            filename = att["filename"]
+            url = att["content"]
+            dest_path = os.path.join(dest_dir, filename)
+            response = requests.get(url, auth=self.auth)
+            response.raise_for_status()
+            with open(dest_path, "wb") as f:
+                f.write(response.content)
+            results.append({
+                "filename": filename,
+                "path": dest_path,
+                "mime_type": att.get("mimeType", ""),
+            })
+        return results
 
     def attach_file(self, issue_key: str, file_path: str) -> str:
         url = f"{self.base_url}/rest/api/3/issue/{issue_key}/attachments"
