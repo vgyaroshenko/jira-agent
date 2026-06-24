@@ -225,15 +225,72 @@ def update(issue_key, title, lang):
     click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
 
 
+def _human_readable_to_table(text):
+    """Convert human-readable test case format to markdown table."""
+    rows = []
+    current_suite = ""
+    current_case = None
+    current_desc = ""
+    current_priority = ""
+    current_steps = []
+    in_steps = False
+
+    for line in text.split("\n"):
+        if line.startswith("### "):
+            if current_case is not None:
+                rows.append((current_suite, current_case, current_desc, "\\n".join(current_steps), current_priority))
+            current_case = line[4:].strip()
+            current_desc = ""
+            current_priority = ""
+            current_steps = []
+            in_steps = False
+        elif line.startswith("## ") and not line.startswith("### "):
+            suite_name = line[3:].strip()
+            if any(w in suite_name for w in ("Рекомендац", "Recommend")):
+                break
+            current_suite = suite_name
+            in_steps = False
+        elif line.startswith(("Опис:", "Описание:", "Description:")):
+            val = line.split(":", 1)[1].strip()
+            current_desc = "" if val in ("(якщо є)", "(если есть)", "(if any)") else val
+        elif line.startswith(("Пріоритет:", "Приоритет:", "Priority:")):
+            current_priority = line.split(":", 1)[1].strip()
+        elif line.startswith(("Кроки:", "Шаги:", "Steps:")):
+            in_steps = True
+        elif in_steps and line.strip():
+            current_steps.append(line.strip())
+        elif in_steps and not line.strip():
+            in_steps = False
+
+    if current_case is not None:
+        rows.append((current_suite, current_case, current_desc, "\\n".join(current_steps), current_priority))
+
+    if not rows:
+        return None
+
+    has_suites = any(r[0] for r in rows)
+    if has_suites:
+        lines = ["| Suite | Case | Description | Steps | Priority |", "|---|---|---|---|---|"]
+        for suite, case, desc, steps, priority in rows:
+            lines.append(f"| {suite} | {case} | {desc} | {steps} | {priority} |")
+    else:
+        lines = ["| Case | Description | Steps | Priority |", "|---|---|---|---|"]
+        for _, case, desc, steps, priority in rows:
+            lines.append(f"| {case} | {desc} | {steps} | {priority} |")
+
+    return "\n".join(lines)
+
+
 @cli.command("publish-tests")
 @click.argument("issue_key", required=False)
-def publish_tests(issue_key):
+@click.option("--convert", is_flag=True, default=False, help="Конвертувати людиночитаємий формат у таблицю перед публікацією")
+def publish_tests(issue_key, convert):
     """Опублікувати тест-кейси з test-cases/ як коментар до задачі.
 
     \b
     Приклади:
       python main.py publish-tests MES-477
-      python main.py publish-tests
+      python main.py publish-tests MES-477 --convert
     """
     import glob
     test_cases_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-cases")
@@ -261,6 +318,14 @@ def publish_tests(issue_key):
     if not text:
         click.echo(f"❌ Файл {file_path} порожній")
         sys.exit(1)
+
+    if convert:
+        converted = _human_readable_to_table(text)
+        if not converted:
+            click.echo("❌ Не вдалося розпізнати формат файлу для конвертації")
+            sys.exit(1)
+        text = converted
+        click.echo("✓ Конвертовано у табличний формат")
 
     click.echo(f"\n⏳ Публікую тест-кейси для {issue_key}...")
     jira = JiraClient()
