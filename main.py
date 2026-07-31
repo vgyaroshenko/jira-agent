@@ -36,6 +36,25 @@ def _ask_type() -> str:
     return choice
 
 
+def _default_assignee_email(project_key: str, area: str) -> str | None:
+    if not project_key or not area:
+        return None
+    key = project_key.upper().replace("-", "_")
+    return os.getenv(f"PROJECT_ASSIGNEE_{area.upper()}_{key}") or None
+
+
+def _assign_if_configured(jira: JiraClient, issue_key: str, project_key: str, area: str) -> None:
+    email = _default_assignee_email(project_key, area)
+    if not email:
+        return
+    account_id = jira.find_account_id(email)
+    if not account_id:
+        click.echo(f"⚠️  Відповідального {email} не знайдено — задачу не призначено")
+        return
+    jira.assign_issue(issue_key, account_id)
+    click.echo(f"   Призначено на: {email}")
+
+
 @click.group()
 def cli():
     """🤖 Jira QA Agent — інструменти для Claude Code"""
@@ -109,12 +128,13 @@ def comment(issue_key, mention):
 @click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
 @click.option("--project", default=None, help="Ключ проекту (наприклад GN)")
 @click.option("--related", default=None, help="Ключ пов'язаної задачі (наприклад GN-1652)")
-def new_bug(title, lang, project, related):
+@click.option("--area", default=None, type=click.Choice(["front", "back"]), help="Область бага: front або back — для автопризначення відповідального з .env")
+def new_bug(title, lang, project, related, area):
     """Прочитати структурований опис зі stdin і створити баг в Jira.
 
     \b
     Приклади:
-      python main.py new-bug --title "Попап не відкривається" --lang UA --related GN-1652 << 'EOF'
+      python main.py new-bug --title "Попап не відкривається" --lang UA --related GN-1652 --area front << 'EOF'
       ##ENV##
       ...
       EOF
@@ -141,6 +161,7 @@ def new_bug(title, lang, project, related):
     )
     click.echo(f"\n✅ Баг створено: {bug_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{bug_key}")
+    _assign_if_configured(jira, bug_key, bug_key.split("-")[0], area)
 
 
 @cli.command("new-task")
@@ -149,12 +170,13 @@ def new_bug(title, lang, project, related):
 @click.option("--project", required=True, help="Ключ проекту (наприклад GN)")
 @click.option("--type", "issue_type", default=None, help="Тип: Story, Task. Якщо не вказано — запитається інтерактивно")
 @click.option("--related", default=None, help="Ключ пов'язаної задачі (наприклад GN-1652)")
-def new_task(title, lang, project, issue_type, related):
+@click.option("--area", default=None, type=click.Choice(["front", "back"]), help="Область задачі: front або back — для автопризначення відповідального з .env")
+def new_task(title, lang, project, issue_type, related, area):
     """Прочитати опис задачі зі stdin і створити в Jira.
 
     \b
     Приклад:
-      python main.py new-task --title "Назва" --lang UA --type Story --project GN << 'EOF'
+      python main.py new-task --title "Назва" --lang UA --type Story --project GN --area back << 'EOF'
       ##DESC##
       ...
       EOF
@@ -184,6 +206,7 @@ def new_task(title, lang, project, issue_type, related):
     )
     click.echo(f"\n✅ {issue_type} створено: {task_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{task_key}")
+    _assign_if_configured(jira, task_key, project, area)
 
 
 @cli.command()
@@ -348,6 +371,27 @@ def attach(issue_key, file_path):
     jira = JiraClient()
     filename = jira.attach_file(issue_key, file_path)
     click.echo(f"✅ Файл прикріплено: {filename}")
+    click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
+
+
+@cli.command()
+@click.argument("issue_key")
+@click.option("--email", required=True, help="Email користувача-виконавця")
+def assign(issue_key, email):
+    """Призначити виконавця задачі за email.
+
+    \b
+    Приклад:
+      python main.py assign GN-1808 --email user@example.com
+    """
+    jira = JiraClient()
+    click.echo(f"\n⏳ Шукаю користувача {email}...")
+    account_id = jira.find_account_id(email)
+    if not account_id:
+        click.echo(f"❌ Користувача з email {email} не знайдено")
+        sys.exit(1)
+    jira.assign_issue(issue_key, account_id)
+    click.echo(f"✅ Задачу {issue_key} призначено на {email}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
 
 

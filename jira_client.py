@@ -504,6 +504,18 @@ class JiraClient:
         response.raise_for_status()
         return response.json()[0]["filename"]
 
+    def find_account_id(self, email: str) -> str | None:
+        url = f"{self.base_url}/rest/api/3/user/search"
+        response = requests.get(url, auth=self.auth, headers=self.headers, params={"query": email})
+        response.raise_for_status()
+        users = response.json()
+        return users[0]["accountId"] if users else None
+
+    def assign_issue(self, issue_key: str, account_id: str) -> None:
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/assignee"
+        response = requests.put(url, json={"accountId": account_id}, auth=self.auth, headers=self.headers)
+        response.raise_for_status()
+
     def _link_issues(self, bug_key: str, related_key: str) -> None:
         url = f"{self.base_url}/rest/api/3/issueLink"
         payload = {
