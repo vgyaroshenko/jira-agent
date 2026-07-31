@@ -24,6 +24,7 @@ source .venv/bin/activate
 | `/new-task` | Створення Story / Task / Improvement |
 | `/qa-check GN-1808` | Перевірка якості задачі |
 | `/sprint-review GN` | Огляд спринту + тест-кейси для задач без TC |
+| `/daily-report` | Тезисний звіт за день по проекту — тригериться і фразою на кшталт "все на сьогодні" |
 
 ---
 
