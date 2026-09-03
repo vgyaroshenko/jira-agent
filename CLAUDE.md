@@ -11,6 +11,12 @@ source .venv/bin/activate
 
 Налаштування Jira — у файлі `.env`. Мова проекту — `PROJECT_LANG_KEY` у `.env`.
 
+Документація по проекту (специфікації, вимоги) — у `.env`:
+- `PROJECT_DOCS_<KEY>` — одне посилання, якщо документація єдина на весь проект
+- `PROJECT_DOCS_FRONT_<KEY>` / `PROJECT_DOCS_ADMIN_<KEY>` — якщо документація розділена на фронтову частину й адмінку
+
+Перед аналізом задачі чи тест-кейсів перевіряй, чи є для проекту `PROJECT_DOCS_*`, і використовуй її як додаткове джерело контексту.
+
 ---
 
 ## Скіли (slash commands)
@@ -38,6 +44,7 @@ source .venv/bin/activate
 | `python main.py new-bug --title "..." --lang UA --project GN [--related GN-123]` | Створити баг (опис зі stdin) |
 | `python main.py new-task --title "..." --lang UA --type Story --project GN` | Створити задачу (опис зі stdin) |
 | `python main.py publish-tests GN-1808 [--convert]` | Опублікувати тест-кейси коментарем; `--convert` конвертує людиночитаємий формат у таблицю |
+| `python main.py publish-tests-sheet GN-1808 [--tab "..."] [--yes]` | Дописати тест-кейси у вкладку Google Sheets проекту (`PROJECT_DOCS_<KEY>`); без `--tab` — інтерактивний вибір |
 | `python main.py attach GN-1808 /path/to/file` | Прикріпити файл до задачі |
 | `python main.py lang GN` | Повернути мову проекту з .env |
 | `python main.py sprint GN` | Вивести задачі активного спринту |

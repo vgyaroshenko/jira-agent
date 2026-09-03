@@ -9,4 +9,5 @@ JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
 JIRA_TOKEN = os.getenv("JIRA_API_TOKEN", "")
 # Используется только как fallback при создании бага без --related
 JIRA_DEFAULT_PROJECT_KEY = os.getenv("JIRA_PROJECT_KEY", "DEV")
+GOOGLE_SERVICE_ACCOUNT_FILE = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "")
 MODEL = "claude-sonnet-4-6"

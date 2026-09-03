@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import click
 import questionary
@@ -124,7 +125,7 @@ def comment(issue_key, mention):
 
 
 @cli.command("new-bug")
-@click.option("--title", required=True, help="Заголовок бага (до 80 символів)")
+@click.option("--title", required=True, help="Заголовок бага (до 255 символів)")
 @click.option("--lang", default=None, help="Мова: UA, RU, EN. Якщо не вказано — запитається інтерактивно")
 @click.option("--project", default=None, help="Ключ проекту (наприклад GN)")
 @click.option("--related", default=None, help="Ключ пов'язаної задачі (наприклад GN-1652)")
@@ -153,7 +154,7 @@ def new_bug(title, lang, project, related, area):
     click.echo(f"\n⏳ Створюю баг...")
     jira = JiraClient()
     bug_key = jira.create_bug(
-        title=title[:80],
+        title=title[:255],
         description=description,
         project_key=project_key,
         related_issue_key=related,
@@ -248,8 +249,9 @@ def update(issue_key, title, lang):
     click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
 
 
-def _human_readable_to_table(text):
-    """Convert human-readable test case format to markdown table."""
+def _parse_human_readable(text):
+    """Parse human-readable test case format into a list of dicts:
+    {suite, case, description, steps: list[str], priority}."""
     rows = []
     current_suite = ""
     current_case = None
@@ -258,10 +260,19 @@ def _human_readable_to_table(text):
     current_steps = []
     in_steps = False
 
+    def flush():
+        rows.append({
+            "suite": current_suite,
+            "case": current_case,
+            "description": current_desc,
+            "steps": list(current_steps),
+            "priority": current_priority,
+        })
+
     for line in text.split("\n"):
         if line.startswith("### "):
             if current_case is not None:
-                rows.append((current_suite, current_case, current_desc, "\\n".join(current_steps), current_priority))
+                flush()
             current_case = line[4:].strip()
             current_desc = ""
             current_priority = ""
@@ -286,22 +297,58 @@ def _human_readable_to_table(text):
             in_steps = False
 
     if current_case is not None:
-        rows.append((current_suite, current_case, current_desc, "\\n".join(current_steps), current_priority))
+        flush()
 
+    return rows
+
+
+def _human_readable_to_table(text):
+    """Convert human-readable test case format to markdown table."""
+    rows = _parse_human_readable(text)
     if not rows:
         return None
 
-    has_suites = any(r[0] for r in rows)
+    has_suites = any(r["suite"] for r in rows)
     if has_suites:
         lines = ["| Suite | Case | Description | Steps | Priority |", "|---|---|---|---|---|"]
-        for suite, case, desc, steps, priority in rows:
-            lines.append(f"| {suite} | {case} | {desc} | {steps} | {priority} |")
+        for r in rows:
+            steps = "\\n".join(r["steps"])
+            lines.append(f"| {r['suite']} | {r['case']} | {r['description']} | {steps} | {r['priority']} |")
     else:
         lines = ["| Case | Description | Steps | Priority |", "|---|---|---|---|"]
-        for _, case, desc, steps, priority in rows:
-            lines.append(f"| {case} | {desc} | {steps} | {priority} |")
+        for r in rows:
+            steps = "\\n".join(r["steps"])
+            lines.append(f"| {r['case']} | {r['description']} | {steps} | {r['priority']} |")
 
     return "\n".join(lines)
+
+
+def _test_cases_dir():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-cases")
+
+
+def _resolve_test_case_file(issue_key):
+    """Find test-cases/<ISSUE_KEY>.md, or prompt interactively if issue_key is omitted.
+    Returns (issue_key, file_path), exits the process on error."""
+    import glob
+    test_cases_dir = _test_cases_dir()
+
+    if issue_key:
+        file_path = os.path.join(test_cases_dir, f"{issue_key.upper()}.md")
+        if not os.path.exists(file_path):
+            click.echo(f"❌ Файл не знайдено: {file_path}")
+            sys.exit(1)
+        return issue_key.upper(), file_path
+
+    files = sorted(glob.glob(os.path.join(test_cases_dir, "*.md")))
+    if not files:
+        click.echo("❌ В папці test-cases немає збережених тест-кейсів")
+        sys.exit(1)
+    choices = [os.path.basename(f).replace(".md", "") for f in files]
+    choice = questionary.select("Тест-кейси якої задачі опублікувати?", choices=choices).ask()
+    if not choice:
+        sys.exit(0)
+    return choice, os.path.join(test_cases_dir, f"{choice}.md")
 
 
 @cli.command("publish-tests")
@@ -315,25 +362,7 @@ def publish_tests(issue_key, convert):
       python main.py publish-tests MES-477
       python main.py publish-tests MES-477 --convert
     """
-    import glob
-    test_cases_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-cases")
-
-    if issue_key:
-        file_path = os.path.join(test_cases_dir, f"{issue_key.upper()}.md")
-        if not os.path.exists(file_path):
-            click.echo(f"❌ Файл не знайдено: {file_path}")
-            sys.exit(1)
-    else:
-        files = sorted(glob.glob(os.path.join(test_cases_dir, "*.md")))
-        if not files:
-            click.echo("❌ В папці test-cases немає збережених тест-кейсів")
-            sys.exit(1)
-        choices = [os.path.basename(f).replace(".md", "") for f in files]
-        choice = questionary.select("Тест-кейси якої задачі опублікувати?", choices=choices).ask()
-        if not choice:
-            sys.exit(0)
-        issue_key = choice
-        file_path = os.path.join(test_cases_dir, f"{issue_key}.md")
+    issue_key, file_path = _resolve_test_case_file(issue_key)
 
     with open(file_path, "r", encoding="utf-8") as f:
         text = f.read().strip()
@@ -355,6 +384,75 @@ def publish_tests(issue_key, convert):
     jira.add_comment(issue_key, text)
     click.echo(f"✅ Тест-кейси опубліковано до {issue_key}")
     click.echo(f"   Посилання: {jira.base_url}/browse/{issue_key}")
+
+
+@cli.command("publish-tests-sheet")
+@click.argument("issue_key", required=False)
+@click.option("--tab", default=None, help="Назва вкладки в Google Sheets. Якщо не вказано — інтерактивний вибір")
+@click.option("--yes", is_flag=True, default=False, help="Не питати підтвердження перед записом")
+@click.option("--replace-from", type=int, default=None, help="Перезаписати наявні рядки, починаючи з цього номера рядка (1-indexed), замість дописування в кінець")
+def publish_tests_sheet(issue_key, tab, yes, replace_from):
+    """Дописати тест-кейси з test-cases/ у Google Sheets проекту (PROJECT_DOCS_<KEY> у .env).
+
+    \b
+    Приклади:
+      python main.py publish-tests-sheet IABW-76
+      python main.py publish-tests-sheet IABW-76 --tab "Admin panel: FAQ и Suggested FAQ" --yes
+      python main.py publish-tests-sheet IABW-76 --tab "..." --replace-from 44 --yes
+    """
+    from sheets_client import SheetsClient
+
+    issue_key, file_path = _resolve_test_case_file(issue_key)
+
+    with open(file_path, "r", encoding="utf-8") as f:
+        text = f.read().strip()
+    if not text:
+        click.echo(f"❌ Файл {file_path} порожній")
+        sys.exit(1)
+
+    rows = _parse_human_readable(text)
+    if not rows:
+        click.echo("❌ Не вдалося розпізнати формат файлу")
+        sys.exit(1)
+
+    # Ця вкладка не нумерує кейси — прибираємо префікс "TC-001 — "
+    for r in rows:
+        r["case"] = re.sub(r"^TC-\d+\s*—\s*", "", r["case"])
+
+    project_key = issue_key.split("-")[0]
+    sheet_url = os.getenv(f"PROJECT_DOCS_{project_key}")
+    if not sheet_url:
+        click.echo(f"❌ У .env не задано PROJECT_DOCS_{project_key}")
+        sys.exit(1)
+
+    sheets = SheetsClient()
+
+    if not tab:
+        click.echo("⏳ Отримую список вкладок...")
+        tabs = sheets.list_tabs(sheet_url)
+        tab = questionary.select("У яку вкладку дописати тест-кейси?", choices=tabs).ask()
+        if not tab:
+            sys.exit(0)
+
+    action = f"перезаписано, починаючи з рядка {replace_from}," if replace_from else "дописано"
+    click.echo(f"\nБуде {action} {len(rows)} тест-кейс(ів) у вкладку «{tab}»:")
+    for r in rows[:3]:
+        click.echo(f"  • {r['case']}")
+    if len(rows) > 3:
+        click.echo(f"  … і ще {len(rows) - 3}")
+
+    if not yes:
+        if not questionary.confirm("Записати у Google Sheets?", default=False).ask():
+            click.echo("Скасовано")
+            sys.exit(0)
+
+    click.echo("\n⏳ Записую у Google Sheets...")
+    if replace_from:
+        count = sheets.replace_rows(sheet_url, tab, replace_from, rows)
+    else:
+        count = sheets.append_test_cases(sheet_url, tab, rows)
+    click.echo(f"✅ Додано {count} тест-кейс(ів) у вкладку «{tab}»")
+    click.echo(f"   Посилання: {sheet_url}")
 
 
 @cli.command()
